@@ -5,7 +5,7 @@
 - 所需环境：python3，requirments.txt中的库 ~~(通过chatgpt已将`des.js`转为`des.py`，不再需要nodejs)~~
 - 此脚本只在软件学院网络进行过测试，对于其他校区是否可用未进行测试
 - 需要注意，在校园网提示密码需要更换时，可能脚本无法正确登录，如下图的场景![alt text](README.assets/image-6.png)
-- 最后测试的可使用日期：2024.9.27
+- 最后测试的可使用日期：2026.10.28
 
 ## 宇宙级免责声明
 - 本脚本只是为了便于非图形化终端的用户登录校园网，没有对校园网有任何攻击行为，也不会泄漏用户个人信息
@@ -15,11 +15,59 @@
 - 本项目仅供个人学习交流使用
 
 ## 使用方法
-- 通过`pip install -r requirements.txt`或手动安装所需库
-- 使用示例：`python dlut_autologin.py [-u username] [-p password] [-i IP]`
-- 参数为校园网账户和密码和当前设备的校园IP地址，因为校园网在未登录时已获取IP，设备可通过`ipconfig/ifconfig/ip addr show`等命令获取，此参数若未给出则通过脚本中的函数自动获取。如果没在命令中给出账户和密码，则会在运行时提示输入。
-- ~~dist文件夹下的可执行文件是本人在m2的macmini生成的，也许可以直接使用，并未进行测试~~
-- ~~des.js里包含了加密算法，通过chatgpt已将`des.js`转为`des.py`~~
+
+### 初始化环境与本地配置（Windows）
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item config.example.json config.local.json
+Copy-Item dlut_cookies.example.json dlut_cookies.json
+```
+
+在 `config.local.json` 中填写 `username`（学号）和 `password`（密码）。
+`cookies_file` 指向 Cookie JSON 文件，相对路径以配置文件所在目录为准。
+这两个本地文件含敏感信息，已被 Git 忽略；提交到仓库的 `.example.json` 只含占位符。
+已有本地文件时无需重新复制模板，以免覆盖已填写的内容。
+
+如果统一身份认证要求短信二次验证，先在 Edge 中完成认证，然后把
+`sso.dlut.edu.cn` 域名下的 `JSESSIONIDCAS`、`devInfo` 的实际内容填入
+`dlut_cookies.json`（如有 `TGC` 也可作为同名字段加入）。脚本仅把这些 Cookie
+发送给 SSO 域名，路径为 `/`。Cookie 失效时需重新认证并更新本地文件。
+不使用 Cookie 时，从配置中删除 `cookies_file` 字段或设为空字符串。
+
+### 单次登录
+
+```powershell
+.\.venv\Scripts\python.exe .\dlut_autologin.py
+```
+
+默认读取脚本目录的 `config.local.json`；也可通过 `--config` 指定其他 JSON 文件。
+命令行的 `-u`、`-p`、`--cookies` 优先于配置文件。`--cookies` 的相对路径以当前工作目录为准。
+未提供账户或密码时会交互询问，密码输入不回显；推荐使用本地配置，避免把密码写入命令历史。
+`-i IP` 可指定校园网 IPv4，不指定时自动检测网卡。
+
+```powershell
+.\.venv\Scripts\python.exe .\dlut_autologin.py --config .\config.local.json -i 172.29.0.100
+```
+
+登录成功以进入校园网自助服务首页为准；需要短信二次认证时会明确提示。
+
+### 自动重连
+
+```powershell
+pwsh -File .\auto_boost.ps1
+```
+
+需要 PowerShell 7。脚本使用项目内的 `.venv`、`config.local.json`，不再包含账号、密码或机器绝对路径。
+每次重连会释放并重新获取网卡地址，导致短暂断网；失败后每隔 30 秒重试，成功后每隔 5 分钟检测网络。
+按 `Ctrl+C` 停止。
+
+### 本地验证（不访问校园网、不重置网卡）
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
 
 ## 校园网行为分析
 

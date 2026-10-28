@@ -6,3 +6,13 @@ pyvenv.cfg
 dlut_autologin.spec
 build
 __pycache__
+
+dlut_cookies.json
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+config.local.json
+*.local.json
+*.log

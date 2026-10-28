@@ -3,13 +3,14 @@ import argparse
 import re
 import time
 from bs4 import BeautifulSoup
-import subprocess
 import json
 import psutil
 import getpass
 import socket
 import os
 import sys
+from urllib.parse import urlsplit
+from pathlib import Path
 from des import str_enc
 
 # 正则表达式匹配IPv4地址
@@ -126,7 +127,7 @@ def extract_value_by_id_or_name(soup, attribute_type, attribute_value):
 # 实际登录函数
 
 
-def do_login(username, password, ip):
+def do_login(username, password, ip, cookies=None):
     if not is_ipv4(ip):
         return False
     # 初始URL，可能是你想访问的网站的URL，这个网站将你重定向到SSO登录页面
@@ -136,6 +137,10 @@ def do_login(username, password, ip):
 
     # 创建一个session对象，这样Cookies和会话信息就可以在请求之间保持了
     session = requests.Session()
+    for name, value in (cookies or {}).items():
+        session.cookies.set(
+            name, value, domain="sso.dlut.edu.cn", path="/", secure=True
+        )
 
     # 首先访问初始URL
     response = session.get(initial_url)
@@ -173,13 +178,13 @@ def do_login(username, password, ip):
             "execution": execution_value,
             "_eventId": event_id_value,
         }
-        print(f"Login form: \n{login_data}")
 
         # 提交登录表单
         login_response = session.post(sso_login_url, data=login_data)
 
-        # 检查登录是否成功，由于登录成功后会重定向到校园网首页，失败则还是在sso_login_url，通过检查重定向历史记录来判断
-        if login_response.history:
+        # 只有最终进入校园网自助服务首页才算认证成功。
+        destination = urlsplit(login_response.url)
+        if destination.hostname == "172.20.30.2" and destination.path.rstrip("/") == "/Self/dashboard":
             print("Redirection...")
 
             time.sleep(2)  # 等待2秒，防止后台新登录的数据还未刷新
@@ -189,9 +194,11 @@ def do_login(username, password, ip):
             online_list = json.loads(online_list_response.text)
             format_online_list_print(online_list)
         else:
-            print(
-                "Login failed, no redirection found. Please check the entered account, password, and IP."
-            )
+            login_soup = BeautifulSoup(login_response.content, "lxml")
+            if login_soup.find("input", attrs={"name": "PM1"}):
+                print("Login requires SMS verification. Complete verification in Edge and refresh the cookie file.")
+            else:
+                print("Login failed: the server did not reach the campus dashboard. Check credentials and cookie validity.")
             return False
     else:
         raise Exception("No redirection, direct access!")
@@ -201,7 +208,7 @@ def do_login(username, password, ip):
 # 处理每次登录
 
 
-def login(username, password, ip):
+def login(username, password, ip, cookies=None):
 
     if not username:
         username = input("Please enter your username: ")
@@ -221,7 +228,7 @@ def login(username, password, ip):
         try:
             # 尝试登录
             print(f"Attempting to log in for the {attempt_count}th time...")
-            if do_login(username, password, ip):
+            if do_login(username, password, ip, cookies):
                 break
             else:
                 return (-1, f"ip: {ip}, Login failed!")
@@ -240,6 +247,19 @@ def login(username, password, ip):
         )
 
 
+def load_config(path):
+    """Read local credentials without including their contents in error messages."""
+    with Path(path).open(encoding="utf-8-sig") as config_file:
+        config = json.load(config_file)
+    if not isinstance(config, dict) or any(
+        key not in {"username", "password", "cookies_file"}
+        or not isinstance(value, str)
+        for key, value in config.items()
+    ):
+        raise ValueError("Invalid configuration")
+    return config
+
+
 def main():
     # 创建 ArgumentParser 对象
     parser = argparse.ArgumentParser(description="Processing required parameters")
@@ -250,8 +270,36 @@ def main():
     parser.add_argument("-i", "--ip", type=str, help="The IP address")
     parser.add_argument("-r", "--refresh", action="store_true", help="Whether or not refresh all the adapters before log in")
 
+    parser.add_argument("--cookies", type=str, help="Path to an Edge SSO cookie JSON file")
+    parser.add_argument("--config", type=Path, help="Path to local login configuration JSON")
+
     # 解析命令行参数
     args = parser.parse_args()
+    config_path = args.config or Path(__file__).with_name("config.local.json")
+    config = {}
+    if args.config is not None or config_path.exists():
+        try:
+            config = load_config(config_path)
+        except (OSError, ValueError):
+            parser.error("Cannot read login configuration; check its path, JSON format and string fields.")
+    if args.username is None:
+        args.username = config.get("username")
+    if args.password is None:
+        args.password = config.get("password")
+    if args.cookies is None and config.get("cookies_file"):
+        args.cookies = config_path.parent / config["cookies_file"]
+    cookies = None
+    if args.cookies:
+        try:
+            with open(args.cookies, encoding="utf-8-sig") as cookie_file:
+                cookies = json.load(cookie_file)
+        except (OSError, ValueError):
+            parser.error("Cannot read cookie JSON file; check its path and JSON format.")
+        if not isinstance(cookies, dict) or not cookies or not all(
+            isinstance(name, str) and name and isinstance(value, str) and value
+            for name, value in cookies.items()
+        ):
+            parser.error("Cookie JSON must be a non-empty object of cookie names and string values.")
 
     if args.refresh:
         print("Refreshing adapters...")
@@ -262,14 +310,14 @@ def main():
     ret_value = -1
 
     if args.ip:
-        ret, msg = login(args.username, args.password, args.ip)
+        ret, msg = login(args.username, args.password, args.ip, cookies)
         ret_value = ret
         print(msg)
     else:
         ip_list = get_local_ip()
         result = []
         for ip in ip_list:
-            result.append(login(args.username, args.password, ip))
+            result.append(login(args.username, args.password, ip, cookies))
         for ret, r in result:
             print(r)
             if ret == 0:

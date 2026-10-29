@@ -25,9 +25,10 @@ while ($true) {
         Start-Sleep -Seconds 30
     }
 
-    while (Test-Connection -TargetName www.baidu.com, www.bilibili.com, www.bing.com -IPv4) {
-        Write-Host (Get-Date).ToString(): "网络已连接，5分钟后再次检测。" -ForegroundColor Green
-        Start-Sleep -Duration (New-TimeSpan -Minutes 5)
+    # -Quiet returns one Boolean per target; explicitly check for any success.
+    while ((Test-Connection -TargetName www.baidu.com, www.bilibili.com, www.bing.com -IPv4 -Count 1 -Quiet) -contains $true) {
+        Write-Host (Get-Date).ToString(): "网络已连接，2分钟后再次检测。" -ForegroundColor Green
+        Start-Sleep -Duration (New-TimeSpan -Minutes 2)
     }
 
     Write-Host (Get-Date).ToString(): "网络断开。正在重新连接……" -ForegroundColor Red
